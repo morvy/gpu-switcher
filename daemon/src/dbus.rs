@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use zbus::{fdo, interface, object_server::SignalContext};
 
-use crate::config::{AutoMode, Config};
+use crate::config::{AutoMode, Config, PpdCoupling};
 use crate::sysfs::AmdgpuNode;
 use crate::{ppd, sysfs};
 
@@ -36,11 +36,25 @@ pub async fn apply_stop(
     }
 
     // Async PPD call — no lock held.
-    let ppd_profile =
-        sysfs::stop_to_ppd(stop).map_err(|e| fdo::Error::Failed(e.to_string()))?;
-    ppd::set_active_profile(conn, ppd_profile)
-        .await
-        .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+    let (coupling, ppd_profile_opt) = {
+        let state = state_arc
+            .lock()
+            .map_err(|_| fdo::Error::Failed("state lock poisoned".into()))?;
+        let coupling = state.config.profile.ppd_coupling;
+        let ppd = if coupling == PpdCoupling::Coupled {
+            Some(sysfs::stop_to_ppd(stop).map_err(|e| fdo::Error::Failed(e.to_string()))?)
+        } else {
+            None
+        };
+        (coupling, ppd)
+    };
+    let _ = coupling; // only used to decide ppd_profile_opt above
+
+    if let Some(ppd_profile) = ppd_profile_opt {
+        ppd::set_active_profile(conn, ppd_profile)
+            .await
+            .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+    }
 
     // Update config and save (save is sync).
     {
@@ -149,6 +163,106 @@ impl Manager {
             AutoMode::Manual => "manual",
             AutoMode::AcBattery => "ac_battery",
             AutoMode::BatteryPct => "battery_pct",
+        };
+        Ok(s.to_string())
+    }
+
+    async fn set_ppd_profile(&self, profile: String) -> fdo::Result<()> {
+        match profile.as_str() {
+            "power-saver" | "balanced" | "performance" => {}
+            other => {
+                return Err(fdo::Error::InvalidArgs(format!(
+                    "unknown PPD profile {other:?}"
+                )));
+            }
+        }
+        {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| fdo::Error::Failed("state lock poisoned".into()))?;
+            if state.config.profile.ppd_coupling != PpdCoupling::Independent {
+                return Err(fdo::Error::Failed(
+                    "SetPpdProfile only valid when coupling=independent".into(),
+                ));
+            }
+        }
+        ppd::set_active_profile(&self.conn, &profile)
+            .await
+            .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| fdo::Error::Failed("state lock poisoned".into()))?;
+            state.config.profile.current_ppd_profile = profile;
+            state
+                .config
+                .save()
+                .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    async fn set_coupling(
+        &self,
+        coupling: String,
+        #[zbus(signal_context)] ctx: SignalContext<'_>,
+    ) -> fdo::Result<()> {
+        let parsed = match coupling.as_str() {
+            "coupled" => PpdCoupling::Coupled,
+            "gpu_only" => PpdCoupling::GpuOnly,
+            "independent" => PpdCoupling::Independent,
+            other => {
+                return Err(fdo::Error::InvalidArgs(format!(
+                    "unknown coupling {other:?}; expected coupled, gpu_only, or independent"
+                )));
+            }
+        };
+        let current_stop = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| fdo::Error::Failed("state lock poisoned".into()))?;
+            state.config.profile.ppd_coupling = parsed;
+            state
+                .config
+                .save()
+                .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+            state.config.profile.current_stop
+        };
+        // When switching to Coupled, sync PPD to the current GPU stop immediately.
+        if parsed == PpdCoupling::Coupled {
+            let ppd_profile =
+                sysfs::stop_to_ppd(current_stop).map_err(|e| fdo::Error::Failed(e.to_string()))?;
+            ppd::set_active_profile(&self.conn, ppd_profile)
+                .await
+                .map_err(|e| fdo::Error::Failed(e.to_string()))?;
+        }
+        // Re-emit current stop so the UI refreshes after coupling change.
+        Manager::stop_changed(&ctx, current_stop).await?;
+        Ok(())
+    }
+
+    #[zbus(property)]
+    async fn current_ppd_profile(&self) -> fdo::Result<String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| fdo::Error::Failed("state lock poisoned".into()))?;
+        Ok(state.config.profile.current_ppd_profile.clone())
+    }
+
+    #[zbus(property)]
+    async fn ppd_coupling(&self) -> fdo::Result<String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| fdo::Error::Failed("state lock poisoned".into()))?;
+        let s = match state.config.profile.ppd_coupling {
+            PpdCoupling::Coupled => "coupled",
+            PpdCoupling::GpuOnly => "gpu_only",
+            PpdCoupling::Independent => "independent",
         };
         Ok(s.to_string())
     }

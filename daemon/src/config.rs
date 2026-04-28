@@ -5,18 +5,26 @@ use std::path::Path;
 
 const CONFIG_PATH: &str = "/etc/gpu-switcher.toml";
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AutoMode {
+    #[default]
     Manual,
     AcBattery,
     BatteryPct,
 }
 
-impl Default for AutoMode {
-    fn default() -> Self {
-        AutoMode::Manual
-    }
+/// How the GPU-profile slider interacts with power-profiles-daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PpdCoupling {
+    /// GPU slider also sets the PPD profile in lockstep (default).
+    #[default]
+    Coupled,
+    /// GPU slider only; PPD is never touched.
+    GpuOnly,
+    /// Two independent sliders: one for GPU level, one for PPD profile.
+    Independent,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -24,6 +32,15 @@ pub struct ProfileConfig {
     pub current_stop: u8,
     pub ac_default_stop: u8,
     pub battery_stop: u8,
+    #[serde(default)]
+    pub ppd_coupling: PpdCoupling,
+    /// Last PPD profile set when coupling = Independent.
+    #[serde(default = "default_ppd_profile")]
+    pub current_ppd_profile: String,
+}
+
+fn default_ppd_profile() -> String {
+    "balanced".to_string()
 }
 
 impl Default for ProfileConfig {
@@ -32,6 +49,8 @@ impl Default for ProfileConfig {
             current_stop: 2,
             ac_default_stop: 3,
             battery_stop: 1,
+            ppd_coupling: PpdCoupling::default(),
+            current_ppd_profile: default_ppd_profile(),
         }
     }
 }

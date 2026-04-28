@@ -14,5 +14,8 @@
     <entry name="acDefaultStop" type="Int">
       <default>3</default>
     </entry>
+    <entry name="ppdCoupling" type="String">
+      <default>coupled</default>
+    </entry>
   </group>
 </kcfg>

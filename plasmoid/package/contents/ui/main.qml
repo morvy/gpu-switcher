@@ -12,6 +12,18 @@ PlasmoidItem {
     property bool pollerBusy: false
     property string pollerCurrentCmd: ""
 
+    property string currentPpdProfile: "balanced"
+    property int currentPpdStop: {
+        switch (currentPpdProfile) {
+            case "power-saver": return 1
+            case "performance": return 3
+            default: return 2
+        }
+    }
+    property bool ppdPollerBusy: false
+    property string ppdPollerCurrentCmd: ""
+    property bool _couplingInitialized: false
+
     readonly property var stopIcons: [
         "",
         "gpu-switcher-save",
@@ -69,7 +81,7 @@ PlasmoidItem {
         }
     }
 
-    // Fire-and-forget executor for SetStop calls
+    // Fire-and-forget executor for DBus calls
     P5Support.DataSource {
         id: runner
         engine: "executable"
@@ -84,6 +96,73 @@ PlasmoidItem {
         var cmd = "busctl --system call net.gpuswitcher.Manager /net/gpuswitcher/Manager net.gpuswitcher.Manager SetStop y " + stop
         runner.connectSource(cmd)
         root.currentStop = stop  // optimistic update
+    }
+
+    function setPpdProfile(profile) {
+        var cmd = "busctl --system call net.gpuswitcher.Manager /net/gpuswitcher/Manager net.gpuswitcher.Manager SetPpdProfile s " + profile
+        runner.disconnectSource(cmd)
+        runner.connectSource(cmd)
+        root.currentPpdProfile = profile  // optimistic update
+    }
+
+    // PPD profile poller — only active in independent coupling mode
+    P5Support.DataSource {
+        id: ppdPoller
+        engine: "executable"
+        connectedSources: []
+
+        onNewData: function(source, data) {
+            var out = data["stdout"] || ""
+            var match = out.match(/"data"\s*:\s*"([^"]+)"/)
+            if (match) root.currentPpdProfile = match[1]
+            ppdPollerTimeout.stop()
+            disconnectSource(source)
+            root.ppdPollerBusy = false
+        }
+    }
+
+    Timer {
+        id: ppdPollerTimeout
+        interval: 8000
+        repeat: false
+        onTriggered: {
+            if (root.ppdPollerCurrentCmd !== "") {
+                ppdPoller.disconnectSource(root.ppdPollerCurrentCmd)
+                root.ppdPollerCurrentCmd = ""
+            }
+            root.ppdPollerBusy = false
+        }
+    }
+
+    Timer {
+        interval: 3000
+        running: (plasmoid.configuration.ppdCoupling || "coupled") === "independent"
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            if (root.ppdPollerBusy) return
+            root.ppdPollerBusy = true
+            var cmd = "busctl --system --json=short get-property net.gpuswitcher.Manager /net/gpuswitcher/Manager net.gpuswitcher.Manager CurrentPpdProfile"
+            root.ppdPollerCurrentCmd = cmd
+            ppdPoller.connectSource(cmd)
+            ppdPollerTimeout.restart()
+        }
+    }
+
+    // Sync coupling to daemon when plasmoid config changes
+    Connections {
+        target: plasmoid.configuration
+        function onPpdCouplingChanged() {
+            if (!root._couplingInitialized) return
+            var coupling = plasmoid.configuration.ppdCoupling || "coupled"
+            var cmd = "busctl --system call net.gpuswitcher.Manager /net/gpuswitcher/Manager net.gpuswitcher.Manager SetCoupling s " + coupling
+            runner.disconnectSource(cmd)
+            runner.connectSource(cmd)
+        }
+    }
+
+    Component.onCompleted: {
+        root._couplingInitialized = true
     }
 
     compactRepresentation: Item {
@@ -106,9 +185,14 @@ PlasmoidItem {
 
     fullRepresentation: FullRepresentation {
         implicitWidth: Kirigami.Units.gridUnit * 18
-        implicitHeight: Kirigami.Units.gridUnit * 12
+        implicitHeight: (plasmoid.configuration.ppdCoupling === "independent")
+            ? Kirigami.Units.gridUnit * 22
+            : Kirigami.Units.gridUnit * 14
         currentStop: root.currentStop
         autoMode: plasmoid.configuration.autoMode || "manual"
+        ppdCoupling: plasmoid.configuration.ppdCoupling || "coupled"
+        currentPpdStop: root.currentPpdStop
         onStopRequested: function(stop) { root.setStop(stop) }
+        onPpdProfileRequested: function(profile) { root.setPpdProfile(profile) }
     }
 }

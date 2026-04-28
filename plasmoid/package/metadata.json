@@ -1,0 +1,20 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "devel@invelity.com",
+                "Name": "gpu-switcher"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Switch AMD GPU performance profile (Save/Adaptive/Standard/Perf/Max)",
+        "Icon": "gpu-switcher-balanced",
+        "Id": "net.gpuswitcher.applet",
+        "License": "GPL-2.0+",
+        "Name": "GPU Profile Switcher",
+        "Version": "0.1.0",
+        "Website": ""
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

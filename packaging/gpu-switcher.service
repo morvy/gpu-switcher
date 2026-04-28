@@ -1,0 +1,15 @@
+[Unit]
+Description=GPU Profile Switcher Daemon
+Documentation=https://github.com/user/gpu-switcher
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=net.gpuswitcher.Manager
+ExecStart=/usr/local/bin/gpu-switcher-daemon daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

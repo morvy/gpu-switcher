@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=net.gpuswitcher.Manager
+Exec=/usr/local/bin/gpu-switcher-daemon daemon
+User=root
+SystemdService=gpu-switcher.service

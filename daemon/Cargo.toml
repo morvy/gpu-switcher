@@ -1,0 +1,19 @@
+[package]
+name = "gpu-switcher-daemon"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gpu-switcher-daemon"
+path = "src/main.rs"
+
+[dependencies]
+zbus = { version = "4", features = ["tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+anyhow = "1"
+futures-lite = "2"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

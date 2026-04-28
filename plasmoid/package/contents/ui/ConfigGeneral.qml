@@ -2,36 +2,37 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.plasma.components 3.0 as PlasmaComponents
-import org.kde.kcmutils as KCM
 
-KCM.SimpleKCM {
+Item {
     id: configRoot
+
+    implicitWidth: formLayout.implicitWidth
+    implicitHeight: formLayout.implicitHeight
 
     property string cfg_autoMode: "manual"
     property alias cfg_batteryThreshold: thresholdSpinBox.value
     property alias cfg_acDefaultStop: acStopSpinBox.value
 
+    readonly property var modeValues: ["manual", "ac_battery", "battery_pct"]
+
     Kirigami.FormLayout {
-        anchors.fill: parent
+        id: formLayout
+        anchors.left: parent.left
+        anchors.right: parent.right
 
         QQC2.ComboBox {
             id: autoModeCombo
-            Kirigami.FormData.label: i18n("Auto-switch mode:")
-            model: ListModel {
-                ListElement { text: "Manual";              value: "manual"      }
-                ListElement { text: "AC/Battery switch";   value: "ac_battery"  }
-                ListElement { text: "Battery % threshold"; value: "battery_pct" }
+            Kirigami.FormData.label: "Auto-switch mode:"
+            model: ["Manual", "AC/Battery switch", "Battery % threshold"]
+
+            // Initialise from saved config once loaded
+            Component.onCompleted: {
+                var idx = configRoot.modeValues.indexOf(cfg_autoMode)
+                currentIndex = (idx >= 0) ? idx : 0
             }
-            textRole: "text"
-            valueRole: "value"
-            currentIndex: {
-                for (var i = 0; i < model.count; i++) {
-                    if (model.get(i).value === cfg_autoMode) return i
-                }
-                return 0
-            }
-            onCurrentIndexChanged: cfg_autoMode = model.get(currentIndex).value
+
+            // Only fires on user interaction, not programmatic changes
+            onActivated: cfg_autoMode = configRoot.modeValues[currentIndex]
         }
 
         QQC2.SpinBox {
@@ -39,8 +40,7 @@ KCM.SimpleKCM {
             Kirigami.FormData.label: "Battery threshold (%):"
             from: 5
             to: 90
-            value: plasmoid.configuration.batteryThreshold
-            visible: autoModeCombo.currentValue === "battery_pct"
+            visible: autoModeCombo.currentIndex === 2
         }
 
         QQC2.SpinBox {
@@ -48,7 +48,6 @@ KCM.SimpleKCM {
             Kirigami.FormData.label: "AC default stop (1-5):"
             from: 1
             to: 5
-            value: plasmoid.configuration.acDefaultStop
         }
     }
 }
